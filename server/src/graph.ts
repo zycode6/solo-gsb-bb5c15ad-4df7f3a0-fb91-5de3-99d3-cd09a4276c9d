@@ -38,6 +38,63 @@ export function findPath(edges: EdgeLike[], start: string, goal: string): string
 }
 
 /**
+ * 传递约简（约束瘦身）：找出所有冗余边。
+ * 边 from → to 冗余 ⇔ 在忽略该边自身后，仍存在从 from 到 to 的路径
+ * （即删除它不会改变任何节点间的可达关系）。
+ * 每条冗余边附带一条最短替代路径（节点 id 序列，含起终点；BFS 保证边数最少）。
+ * 按边的下标排除自身，即使图中存在重复边也不会误判。
+ */
+export interface RedundantEdgeInfo<T extends EdgeLike> {
+  edge: T;
+  /** 最短替代路径：从 edge.fromId 到 edge.toId 的节点 id 序列 */
+  path: string[];
+}
+
+export function findRedundantEdges<T extends EdgeLike>(edges: T[]): Array<RedundantEdgeInfo<T>> {
+  const out: Array<RedundantEdgeInfo<T>> = [];
+  for (let i = 0; i < edges.length; i++) {
+    const rest = edges.filter((_, j) => j !== i);
+    const path = findPath(rest, edges[i].fromId, edges[i].toId);
+    if (path) out.push({ edge: edges[i], path });
+  }
+  return out;
+}
+
+/**
+ * 批量瘦身计划：按给定 id 顺序逐条检查——
+ * 仅当该边在「当前剩余边集」中仍然冗余（忽略自身后仍有 from → to 路径）时才移除，
+ * 否则跳过。冗余边可能相互依存（A→B 的替代路径恰好经过 A→C），
+ * 逐条复核保证每次移除都不改变图的传递闭包，从而保持全部可达关系不变。
+ */
+export function planPrune<T extends EdgeLike & { id: number }>(
+  edges: T[],
+  ids: number[],
+): { remove: T[]; skipped: number[] } {
+  const remaining = [...edges];
+  const remove: T[] = [];
+  const skipped: number[] = [];
+  const seen = new Set<number>();
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const idx = remaining.findIndex((e) => e.id === id);
+    if (idx === -1) {
+      skipped.push(id);
+      continue;
+    }
+    const edge = remaining[idx];
+    const rest = remaining.filter((_, j) => j !== idx);
+    if (findPath(rest, edge.fromId, edge.toId)) {
+      remove.push(edge);
+      remaining.splice(idx, 1);
+    } else {
+      skipped.push(id);
+    }
+  }
+  return { remove, skipped };
+}
+
+/**
  * 校验「新增一条 fromId → toId 的边」是否会成环。
  * 若成环，返回完整闭环节点序列 [fromId, toId, …, fromId]
  * （首条为待保存的新边，其余为图中已有边）；否则返回 null。

@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { db, getEdges, getEvidence } from './db';
-import { cycleAfterAdding, findCycle, topoLevels } from './graph';
+import { cycleAfterAdding, findCycle, findRedundantEdges, planPrune, topoLevels } from './graph';
 import { resetWithSample, seedIfEmpty } from './seed';
-import type { Evidence, GraphState } from './types';
+import type { Evidence, GraphState, PruneResult, RedundancyReport } from './types';
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -113,6 +113,39 @@ app.delete('/api/edges/:id', (req, res) => {
   const r = db.prepare('DELETE FROM edges WHERE id = ?').run(Number(req.params.id));
   if (r.changes === 0) return res.status(404).json({ message: '连线不存在' });
   res.json(buildState());
+});
+
+/* ---------- 约束瘦身（传递约简） ---------- */
+
+app.get('/api/redundancy', (_req, res) => {
+  const redundant = findRedundantEdges(getEdges()).map(({ edge, path }) => ({
+    edgeId: edge.id,
+    fromId: edge.fromId,
+    toId: edge.toId,
+    path,
+  }));
+  const report: RedundancyReport = { redundant };
+  res.json(report);
+});
+
+app.post('/api/edges/prune', (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const raw = body.edgeIds;
+  if (!Array.isArray(raw) || raw.some((x) => typeof x !== 'number' || !Number.isInteger(x))) {
+    return res.status(400).json({ message: 'edgeIds 必须为整数数组' });
+  }
+  const ids = raw as number[];
+  // 单个事务：在事务内重新分析「当前仍冗余」的连线并删除，
+  // 逐条复核保证每次删除都不改变可达关系（传递闭包不变）
+  let plan: { remove: Array<{ id: number }>; skipped: number[] } = { remove: [], skipped: [] };
+  const tx = db.transaction(() => {
+    plan = planPrune(getEdges(), ids);
+    const del = db.prepare('DELETE FROM edges WHERE id = ?');
+    for (const e of plan.remove) del.run(e.id);
+  });
+  tx();
+  const result: PruneResult = { ...buildState(), pruned: plan.remove.map((e) => e.id), skipped: plan.skipped };
+  res.json(result);
 });
 
 /* ---------- 导入 / 导出 / 示例 ---------- */

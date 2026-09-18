@@ -3,8 +3,9 @@ import { api, ApiError } from './api';
 import Board from './components/Board';
 import CardForm from './components/CardForm';
 import ConflictBanner from './components/ConflictBanner';
+import PrunePanel from './components/PrunePanel';
 import TimelinePanel from './components/TimelinePanel';
-import type { Evidence, EvidenceFormValues, GraphState } from './types';
+import type { Evidence, EvidenceFormValues, GraphState, RedundantEdge } from './types';
 
 export interface Conflict {
   cycle: string[];
@@ -18,6 +19,8 @@ export default function App() {
   const [linkFrom, setLinkFrom] = useState<string | null>(null);
   const [editing, setEditing] = useState<Evidence | 'new' | null>(null);
   const [busy, setBusy] = useState(false);
+  const [redundant, setRedundant] = useState<RedundantEdge[]>([]);
+  const [pruneFocus, setPruneFocus] = useState<RedundantEdge | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -26,6 +29,22 @@ export default function App() {
       .then(setState)
       .catch(() => setError('无法连接服务器，请确认后端已启动'));
   }, []);
+
+  /* 图状态每次变化后重新做传递约简分析，并取消可能已失效的瘦身高亮 */
+  useEffect(() => {
+    if (!state) return;
+    setPruneFocus(null);
+    let alive = true;
+    api
+      .redundancy()
+      .then((r) => {
+        if (alive) setRedundant(r.redundant);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [state]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -121,6 +140,19 @@ export default function App() {
     void run(() => api.seed());
   }, [run]);
 
+  /* 确认后批量移除：服务端在单个事务中复核并删除当前仍冗余的连线 */
+  const pruneAll = useCallback(() => {
+    if (redundant.length === 0) return;
+    if (
+      !window.confirm(
+        `将移除 ${redundant.length} 条冗余连线。移除后所有证据间的先后可达关系保持不变，确定继续？`,
+      )
+    ) {
+      return;
+    }
+    void run(() => api.pruneEdges(redundant.map((r) => r.edgeId)));
+  }, [redundant, run]);
+
   const titleOf = useCallback(
     (id: string) => state?.evidence.find((e) => e.id === id)?.title ?? id.slice(0, 8),
     [state],
@@ -174,6 +206,17 @@ export default function App() {
 
       {conflict && <ConflictBanner conflict={conflict} titleOf={titleOf} onClose={() => setConflict(null)} />}
 
+      {state && (
+        <PrunePanel
+          redundant={redundant}
+          focus={pruneFocus}
+          busy={busy}
+          titleOf={titleOf}
+          onFocus={setPruneFocus}
+          onPruneAll={pruneAll}
+        />
+      )}
+
       {linkFrom && state && (
         <div className="link-hint">
           连线模式：点击另一张卡片，使「{titleOf(linkFrom)}」<b>必须早于</b>它（Esc 取消）
@@ -187,6 +230,7 @@ export default function App() {
               state={state}
               conflict={conflict}
               linkFrom={linkFrom}
+              pruneFocus={pruneFocus}
               onStartLink={setLinkFrom}
               onCancelLink={() => setLinkFrom(null)}
               onConnect={connect}

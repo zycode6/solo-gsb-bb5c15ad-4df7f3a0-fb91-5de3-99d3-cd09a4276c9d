@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Conflict } from '../App';
-import type { Evidence, GraphState } from '../types';
+import type { Evidence, GraphState, RedundantEdge } from '../types';
 
 interface Rect {
   x: number;
@@ -13,6 +13,8 @@ interface BoardProps {
   state: GraphState;
   conflict: Conflict | null;
   linkFrom: string | null;
+  /** 瘦身面板选中的冗余连线：高亮原连线与其替代路径 */
+  pruneFocus: RedundantEdge | null;
   onStartLink: (id: string) => void;
   onCancelLink: () => void;
   onConnect: (fromId: string, toId: string) => void;
@@ -85,6 +87,18 @@ export default function Board(props: BoardProps) {
     return s;
   }, [conflict]);
   const attempted = conflict && conflict.cycle.length >= 2 ? { from: conflict.cycle[0], to: conflict.cycle[1] } : null;
+
+  /* 瘦身高亮：原连线（琥珀色）+ 替代路径经过的边与节点（绿色） */
+  const pruneAltEdgeKeys = useMemo(() => {
+    const s = new Set<string>();
+    if (props.pruneFocus) {
+      const p = props.pruneFocus.path;
+      for (let i = 0; i < p.length - 1; i++) s.add(`${p[i]}->${p[i + 1]}`);
+    }
+    return s;
+  }, [props.pruneFocus]);
+  const prunePathNodes = useMemo(() => new Set(props.pruneFocus?.path ?? []), [props.pruneFocus]);
+  const pruneTargetKey = props.pruneFocus ? `${props.pruneFocus.fromId}->${props.pruneFocus.toId}` : null;
 
   /* 测量卡片位置，用于绘制 SVG 连线 */
   useLayoutEffect(() => {
@@ -178,19 +192,37 @@ export default function Board(props: BoardProps) {
           <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 1 L 9 5 L 0 9 z" fill="#ff5c6c" />
           </marker>
+          <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#f0a840" />
+          </marker>
+          <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#4ade80" />
+          </marker>
         </defs>
 
         {state.edges.map((e) => {
           const s = positions[e.fromId];
           const t = positions[e.toId];
           if (!s || !t) return null;
-          const isConflict = conflictEdgeKeys.has(`${e.fromId}->${e.toId}`);
+          const key = `${e.fromId}->${e.toId}`;
+          const isConflict = conflictEdgeKeys.has(key);
+          const isPruneTarget = key === pruneTargetKey;
+          const isPruneAlt = pruneAltEdgeKeys.has(key);
+          const cls = [
+            'edge',
+            isConflict ? 'conflict' : '',
+            isPruneTarget ? 'prune-target' : '',
+            isPruneAlt ? 'prune-alt' : '',
+          ]
+            .filter(Boolean)
+            .join(' ');
+          const marker = isConflict ? 'arrow-red' : isPruneTarget ? 'arrow-amber' : isPruneAlt ? 'arrow-green' : 'arrow';
           const d = curve(s, t);
           return (
-            <g key={e.id} className={`edge${isConflict ? ' conflict' : ''}`} onClick={() => props.onDeleteEdge(e.id)}>
+            <g key={e.id} className={cls} onClick={() => props.onDeleteEdge(e.id)}>
               <title>{`${byId.get(e.fromId)?.title ?? ''} 必须早于 ${byId.get(e.toId)?.title ?? ''}（点击删除）`}</title>
               <path className="edge-hit" d={d} />
-              <path className="edge-line" d={d} markerEnd={`url(#${isConflict ? 'arrow-red' : 'arrow'})`} />
+              <path className="edge-line" d={d} markerEnd={`url(#${marker})`} />
             </g>
           );
         })}
@@ -221,6 +253,9 @@ export default function Board(props: BoardProps) {
               const inConflict = conflictNodes.has(ev.id);
               const isSource = linkFrom === ev.id;
               const isTarget = linkFrom !== null && linkFrom !== ev.id;
+              const isPruneEndpoint =
+                props.pruneFocus !== null && (props.pruneFocus.fromId === ev.id || props.pruneFocus.toId === ev.id);
+              const isPrunePath = !isPruneEndpoint && prunePathNodes.has(ev.id);
               return (
                 <article
                   key={ev.id}
@@ -230,6 +265,8 @@ export default function Board(props: BoardProps) {
                     inConflict ? 'in-conflict' : '',
                     isSource ? 'link-source' : '',
                     isTarget ? 'link-target' : '',
+                    isPruneEndpoint ? 'prune-endpoint' : '',
+                    isPrunePath ? 'prune-path' : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}

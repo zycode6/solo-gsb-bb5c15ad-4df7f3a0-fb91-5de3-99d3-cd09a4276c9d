@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cycleAfterAdding, findCycle, findPath, topoLevels } from '../src/graph';
+import { cycleAfterAdding, findCycle, findPath, findRedundantEdges, planPrune, topoLevels } from '../src/graph';
 
 test('合法连线：不成环时返回 null', () => {
   const edges = [{ fromId: 'a', toId: 'b' }];
@@ -75,4 +75,117 @@ test('findCycle：无环返回 null', () => {
     [{ fromId: 'a', toId: 'b' }],
   );
   assert.equal(cycle, null);
+});
+
+/* ---------- 传递约简（约束瘦身） ---------- */
+
+test('findRedundantEdges：三角结构中的直达边冗余，并给出最短替代路径', () => {
+  const edges = [
+    { fromId: 'a', toId: 'b' },
+    { fromId: 'b', toId: 'c' },
+    { fromId: 'a', toId: 'c' },
+  ];
+  const redundant = findRedundantEdges(edges);
+  assert.equal(redundant.length, 1);
+  assert.deepEqual(redundant[0].edge, { fromId: 'a', toId: 'c' });
+  assert.deepEqual(redundant[0].path, ['a', 'b', 'c']);
+});
+
+test('findRedundantEdges：链式结构没有冗余边', () => {
+  const edges = [
+    { fromId: 'a', toId: 'b' },
+    { fromId: 'b', toId: 'c' },
+  ];
+  assert.deepEqual(findRedundantEdges(edges), []);
+});
+
+test('findRedundantEdges：菱形结构中替代路径取最短（边数最少）', () => {
+  const edges = [
+    { fromId: 'a', toId: 'b' },
+    { fromId: 'b', toId: 'c' },
+    { fromId: 'c', toId: 'd' },
+    { fromId: 'a', toId: 'e' },
+    { fromId: 'e', toId: 'd' },
+    { fromId: 'a', toId: 'd' },
+  ];
+  const redundant = findRedundantEdges(edges);
+  assert.equal(redundant.length, 1);
+  assert.deepEqual(redundant[0].edge, { fromId: 'a', toId: 'd' });
+  // a→e→d（2 条边）比 a→b→c→d（3 条边）更短
+  assert.deepEqual(redundant[0].path, ['a', 'e', 'd']);
+});
+
+test('findRedundantEdges：多条冗余边各自给出替代路径', () => {
+  const edges = [
+    { fromId: 'a', toId: 'b' },
+    { fromId: 'b', toId: 'c' },
+    { fromId: 'a', toId: 'c' },
+    { fromId: 'c', toId: 'd' },
+    { fromId: 'a', toId: 'd' },
+  ];
+  const redundant = findRedundantEdges(edges);
+  assert.deepEqual(
+    redundant.map((r) => `${r.edge.fromId}->${r.edge.toId}`).sort(),
+    ['a->c', 'a->d'],
+  );
+  const ad = redundant.find((r) => r.edge.toId === 'd')!;
+  assert.deepEqual(ad.path, ['a', 'c', 'd']);
+});
+
+test('planPrune：逐条复核，跳过当前并不冗余的连线', () => {
+  // a→b 冗余（替代路径 a→c→b）；a→c 从不冗余（忽略自身后 a 到不了 c）
+  const edges = [
+    { id: 1, fromId: 'a', toId: 'b' },
+    { id: 2, fromId: 'a', toId: 'c' },
+    { id: 3, fromId: 'c', toId: 'b' },
+  ];
+  const plan = planPrune(edges, [1, 2]);
+  assert.deepEqual(plan.remove.map((e) => e.id), [1]);
+  assert.deepEqual(plan.skipped, [2]);
+});
+
+test('planPrune：DAG 上所有冗余边无论请求顺序都会被移除（传递约简唯一）', () => {
+  const edges = [
+    { id: 1, fromId: 'a', toId: 'b' },
+    { id: 2, fromId: 'b', toId: 'c' },
+    { id: 3, fromId: 'a', toId: 'c' },
+    { id: 4, fromId: 'c', toId: 'd' },
+    { id: 5, fromId: 'a', toId: 'd' },
+  ];
+  for (const ids of [[3, 5], [5, 3], [1, 2, 3, 4, 5]]) {
+    const plan = planPrune(edges, ids);
+    assert.deepEqual(plan.remove.map((e) => e.id).sort(), [3, 5]);
+  }
+});
+
+test('planPrune：独立冗余边可全部移除，未知 id 被跳过', () => {
+  const edges = [
+    { id: 1, fromId: 'a', toId: 'b' },
+    { id: 2, fromId: 'b', toId: 'c' },
+    { id: 3, fromId: 'a', toId: 'c' },
+    { id: 4, fromId: 'x', toId: 'y' },
+    { id: 5, fromId: 'y', toId: 'z' },
+    { id: 6, fromId: 'x', toId: 'z' },
+  ];
+  const plan = planPrune(edges, [3, 6, 999, 3]);
+  assert.deepEqual(plan.remove.map((e) => e.id), [3, 6]);
+  assert.deepEqual(plan.skipped, [999]);
+});
+
+test('planPrune：移除后各节点间可达关系保持不变', () => {
+  const edges = [
+    { id: 1, fromId: 'a', toId: 'b' },
+    { id: 2, fromId: 'b', toId: 'c' },
+    { id: 3, fromId: 'a', toId: 'c' },
+    { id: 4, fromId: 'c', toId: 'd' },
+    { id: 5, fromId: 'a', toId: 'd' },
+  ];
+  const reachableBefore = (from: string, to: string) => findPath(edges, from, to) !== null;
+  const { remove } = planPrune(edges, [1, 2, 3, 4, 5]);
+  const remaining = edges.filter((e) => !remove.includes(e));
+  for (const from of ['a', 'b', 'c', 'd']) {
+    for (const to of ['a', 'b', 'c', 'd']) {
+      assert.equal(findPath(remaining, from, to) !== null, reachableBefore(from, to), `${from}⇝${to} 可达性应保持不变`);
+    }
+  }
 });

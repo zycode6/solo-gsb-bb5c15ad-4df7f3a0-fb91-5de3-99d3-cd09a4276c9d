@@ -1,4 +1,4 @@
-import type { EvidenceFormValues, GraphState } from './types';
+import type { EvidenceFormValues, GraphState, PruneResult, RedundantEdge } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -32,6 +32,8 @@ export const api = {
   deleteEvidence: (id: string) => request<GraphState>(`/api/evidence/${id}`, { method: 'DELETE' }),
   createEdge: (fromId: string, toId: string) => request<GraphState>('/api/edges', json('POST', { fromId, toId })),
   deleteEdge: (id: number) => request<GraphState>(`/api/edges/${id}`, { method: 'DELETE' }),
+  redundancy: () => request<{ redundant: RedundantEdge[] }>('/api/redundancy'),
+  pruneEdges: (edgeIds: number[]) => request<PruneResult>('/api/edges/prune', json('POST', { edgeIds })),
   importSnapshot: (payload: unknown) => request<GraphState>('/api/import', json('POST', payload)),
   seed: () => request<GraphState>('/api/seed', { method: 'POST' }),
 };

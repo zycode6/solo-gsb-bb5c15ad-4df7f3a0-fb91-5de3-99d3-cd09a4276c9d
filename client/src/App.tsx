@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
-import Board from './components/Board';
+import Board, { type SlimHighlight } from './components/Board';
 import CardForm from './components/CardForm';
 import ConflictBanner from './components/ConflictBanner';
+import SlimPanel from './components/SlimPanel';
 import TimelinePanel from './components/TimelinePanel';
-import type { Evidence, EvidenceFormValues, GraphState } from './types';
+import type { Evidence, EvidenceFormValues, GraphState, SlimReport } from './types';
 
 export interface Conflict {
   cycle: string[];
@@ -14,11 +15,24 @@ export interface Conflict {
 export default function App() {
   const [state, setState] = useState<GraphState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
+  const [slim, setSlim] = useState<SlimReport | null>(null);
+  const [selectedRedundantId, setSelectedRedundantId] = useState<number | null>(null);
   const [linkFrom, setLinkFrom] = useState<string | null>(null);
   const [editing, setEditing] = useState<Evidence | 'new' | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const refreshSlim = useCallback(() => {
+    api
+      .slimReport()
+      .then((report) => {
+        setSlim(report);
+        setSelectedRedundantId((cur) => (cur !== null && report.redundant.some((r) => r.edgeId === cur) ? cur : null));
+      })
+      .catch(() => setSlim({ redundant: [], count: 0 }));
+  }, []);
 
   useEffect(() => {
     api
@@ -27,11 +41,19 @@ export default function App() {
       .catch(() => setError('无法连接服务器，请确认后端已启动'));
   }, []);
 
+  // 图结构变化后重新检测冗余连线（首次加载也会触发）
+  const edgeSignature = state?.edges.map((e) => e.id).join(',') ?? '';
+  useEffect(() => {
+    if (state) refreshSlim();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edgeSignature]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setLinkFrom(null);
         setEditing(null);
+        setSelectedRedundantId(null);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -56,6 +78,8 @@ export default function App() {
         setConflict(null);
         setLinkFrom(null);
         setError(null);
+        setNotice(null);
+        setSelectedRedundantId(null);
       } catch (e) {
         handleApiError(e);
       } finally {
@@ -101,6 +125,29 @@ export default function App() {
     [run],
   );
 
+  const applySlim = useCallback(async () => {
+    const count = slim?.count ?? 0;
+    if (count === 0) return;
+    if (!window.confirm(`批量移除当前 ${count} 条冗余连线？\n所有证据间的先后（可达）关系保持不变，仅删除可被替代路径推导的直接连线。`)) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await api.slimApply();
+      const { removed, ...next } = result;
+      setState(next);
+      setSelectedRedundantId(null);
+      setConflict(null);
+      setError(null);
+      setNotice(removed > 0 ? `已移除 ${removed} 条冗余连线，证据间可达关系保持不变。` : '没有需要移除的冗余连线（可能已被其他操作处理）。');
+      // 图已变更，edgeSignature effect 会重新拉取瘦身报告
+    } catch (e) {
+      handleApiError(e);
+    } finally {
+      setBusy(false);
+    }
+  }, [slim?.count, handleApiError]);
+
   const onImportFile = useCallback(
     async (file: File) => {
       let payload: unknown;
@@ -125,6 +172,14 @@ export default function App() {
     (id: string) => state?.evidence.find((e) => e.id === id)?.title ?? id.slice(0, 8),
     [state],
   );
+
+  const slimHighlight: SlimHighlight | null =
+    slim && selectedRedundantId !== null
+      ? (() => {
+            const redundancy = slim.redundant.find((r) => r.edgeId === selectedRedundantId);
+            return redundancy ? { redundancy } : null;
+          })()
+      : null;
 
   return (
     <div className="app">
@@ -172,6 +227,15 @@ export default function App() {
         </div>
       )}
 
+      {notice && (
+        <div className="toast notice" role="status">
+          <span>✓ {notice}</span>
+          <button className="toast-close" onClick={() => setNotice(null)} aria-label="关闭">
+            ×
+          </button>
+        </div>
+      )}
+
       {conflict && <ConflictBanner conflict={conflict} titleOf={titleOf} onClose={() => setConflict(null)} />}
 
       {linkFrom && state && (
@@ -187,6 +251,7 @@ export default function App() {
               state={state}
               conflict={conflict}
               linkFrom={linkFrom}
+              slimHighlight={slimHighlight}
               onStartLink={setLinkFrom}
               onCancelLink={() => setLinkFrom(null)}
               onConnect={connect}
@@ -194,7 +259,18 @@ export default function App() {
               onDelete={deleteCard}
               onDeleteEdge={deleteEdge}
             />
-            <TimelinePanel state={state} />
+            <div className="sidebar">
+              <SlimPanel
+                report={slim}
+                selectedEdgeId={selectedRedundantId}
+                busy={busy}
+                titleOf={titleOf}
+                onSelect={setSelectedRedundantId}
+                onApply={() => void applySlim()}
+                onRefresh={refreshSlim}
+              />
+              <TimelinePanel state={state} />
+            </div>
           </>
         ) : (
           <div className="loading">加载中…</div>

@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { db, getEdges, getEvidence } from './db';
-import { cycleAfterAdding, findCycle, topoLevels } from './graph';
+import { cycleAfterAdding, findCycle, findRedundantEdges, topoLevels } from './graph';
 import { resetWithSample, seedIfEmpty } from './seed';
-import type { Evidence, GraphState } from './types';
+import type { Evidence, GraphState, Redundancy, SlimReport, SlimResult } from './types';
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -113,6 +113,40 @@ app.delete('/api/edges/:id', (req, res) => {
   const r = db.prepare('DELETE FROM edges WHERE id = ?').run(Number(req.params.id));
   if (r.changes === 0) return res.status(404).json({ message: '连线不存在' });
   res.json(buildState());
+});
+
+/* ---------- 约束瘦身（传递约简） ---------- */
+
+/** 计算当前无环图上的全部冗余直接边，附最短替代路径；不修改数据 */
+function computeSlimReport(): SlimReport {
+  const edges = getEdges();
+  const redundant: Redundancy[] = findRedundantEdges(edges).map((r) => ({
+    edgeId: r.edge.id,
+    fromId: r.edge.fromId,
+    toId: r.edge.toId,
+    alternativePath: r.alternativePath,
+  }));
+  return { redundant, count: redundant.length };
+}
+
+app.get('/api/slim', (_req, res) => {
+  res.json(computeSlimReport());
+});
+
+app.post('/api/slim/apply', (_req, res) => {
+  // 在单个事务中重新判定「当前仍冗余」的连线并批量删除；
+  // 事务内重新读取与判定，保证并发变更下也只会删除仍冗余的边。
+  const tx = db.transaction((): number => {
+    const stale = new Set(findRedundantEdges(getEdges()).map((r) => r.edge.id));
+    if (stale.size === 0) return 0;
+    const del = db.prepare('DELETE FROM edges WHERE id = ?');
+    let removed = 0;
+    for (const id of stale) removed += del.run(id).changes;
+    return removed;
+  });
+  const removed = tx();
+  const result: SlimResult = { ...buildState(), removed };
+  res.json(result);
 });
 
 /* ---------- 导入 / 导出 / 示例 ---------- */

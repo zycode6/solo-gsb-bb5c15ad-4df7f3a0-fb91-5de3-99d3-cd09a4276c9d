@@ -85,6 +85,34 @@ export function topoLevels(ids: string[], edges: EdgeLike[]): Record<string, num
 }
 
 /**
+ * 传递约简（「约束瘦身」）：找出所有冗余直接边。
+ *
+ * 一条边 u → v 是冗余的，当且仅当忽略该边后，图中仍存在 u 到 v 的路径。
+ * 对每条候选边在「去掉自身」的边上做 BFS，返回一条按边数最短的替代路径
+ * （长度 ≥ 2，节点 id 序列，含两端）。图必须为 DAG。
+ *
+ * 在 DAG 上一次性删除这里找出的全部冗余边，等于其唯一的传递约简，
+ * 任意两节点间的可达关系保持不变（见 graph.test.ts 中的性质测试）。
+ */
+export interface RedundantEdge<T extends EdgeLike = EdgeLike> {
+  edge: T;
+  /** 忽略该边后，fromId → toId 的一条最短替代路径（含两端，长度 ≥ 2） */
+  alternativePath: string[];
+}
+
+export function findRedundantEdges<T extends EdgeLike>(edges: T[]): Array<RedundantEdge<T>> {
+  const out: Array<RedundantEdge<T>> = [];
+  for (let i = 0; i < edges.length; i++) {
+    const target = edges[i];
+    if (target.fromId === target.toId) continue;
+    const others = edges.filter((e) => e !== target);
+    const alt = findPath(others, target.fromId, target.toId);
+    if (alt && alt.length >= 2) out.push({ edge: target, alternativePath: alt });
+  }
+  return out;
+}
+
+/**
  * 在已有图中寻找一个环（用于导入快照校验）。
  * 返回闭环节点序列 [n, …, n]；无环返回 null。
  */

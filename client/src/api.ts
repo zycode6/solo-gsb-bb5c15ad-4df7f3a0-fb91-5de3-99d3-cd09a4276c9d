@@ -1,4 +1,4 @@
-import type { EvidenceFormValues, GraphState } from './types';
+import type { EvidenceFormValues, GraphState, SlimReport, SlimResult } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -34,4 +34,6 @@ export const api = {
   deleteEdge: (id: number) => request<GraphState>(`/api/edges/${id}`, { method: 'DELETE' }),
   importSnapshot: (payload: unknown) => request<GraphState>('/api/import', json('POST', payload)),
   seed: () => request<GraphState>('/api/seed', { method: 'POST' }),
+  slimReport: () => request<SlimReport>('/api/slim'),
+  slimApply: () => request<SlimResult>('/api/slim/apply', json('POST', {})),
 };

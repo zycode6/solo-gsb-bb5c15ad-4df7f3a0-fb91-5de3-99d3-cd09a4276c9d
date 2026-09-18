@@ -27,6 +27,8 @@ const SAMPLE_EDGES: Array<[number, number]> = [
   [3, 4],
   [4, 6],
   [3, 5],
+  // 传递性边：发布必然早于连接池耗尽（经由慢查询可推导），供「约束瘦身」演示
+  [0, 2],
 ];
 
 export function resetWithSample(): void {

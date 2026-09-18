@@ -202,14 +202,28 @@ body {
 
 .main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) 340px;
   gap: 18px;
   align-items: start;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-height: calc(100vh - 190px);
+  overflow: auto;
+  padding-right: 2px;
 }
 
 @media (max-width: 1100px) {
   .main {
     grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    max-height: none;
+    overflow: visible;
   }
 }
 
@@ -297,6 +311,35 @@ body {
   stroke-width: 2;
   stroke-dasharray: 5 4;
   pointer-events: none;
+}
+
+/* ---------- 约束瘦身高亮 ---------- */
+
+.edge.slim-redundant .edge-line {
+  stroke: #fbbf24;
+  stroke-width: 3;
+  opacity: 1;
+  stroke-dasharray: 8 5;
+  animation: dash-move 0.9s linear infinite;
+}
+
+.edge.slim-alt-path .edge-line {
+  stroke: var(--ok);
+  stroke-width: 3.5;
+  opacity: 1;
+}
+
+.edge.dimmed .edge-line {
+  opacity: 0.18;
+}
+
+.card.slim-path-node {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.3);
+}
+
+.card.dimmed {
+  opacity: 0.35;
 }
 
 .columns {
@@ -430,8 +473,6 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px 18px;
-  max-height: calc(100vh - 190px);
-  overflow: auto;
 }
 
 .panel h2 {
@@ -563,4 +604,136 @@ body {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 4px;
+}
+
+/* ---------- 瘦身成功提示 ---------- */
+
+.toast.notice {
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.5);
+}
+
+/* ---------- 约束瘦身面板 ---------- */
+
+.slim-panel {
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.slim-head h2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.slim-refresh {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  transition: color 0.15s, border-color 0.15s, transform 0.2s;
+}
+
+.slim-refresh:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.slim-refresh:active {
+  transform: rotate(180deg);
+}
+
+.slim-empty {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.slim-empty-mark {
+  color: var(--ok);
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.slim-intro {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #c4cbe4;
+}
+
+.slim-count {
+  color: #fbbf24;
+  font-size: 15px;
+}
+
+.slim-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.slim-item {
+  width: 100%;
+  text-align: left;
+  appearance: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  padding: 9px 11px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.slim-item:hover {
+  border-color: rgba(251, 191, 36, 0.6);
+}
+
+.slim-item.active {
+  border-color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.2);
+}
+
+.slim-item-edge {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.slim-item-edge b {
+  color: #fbbf24;
+  font-size: 11.5px;
+}
+
+.slim-item-alt {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.slim-apply {
+  width: 100%;
+  justify-content: center;
+  background: linear-gradient(135deg, #d97706, #f59e0b);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.slim-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  text-align: center;
 }

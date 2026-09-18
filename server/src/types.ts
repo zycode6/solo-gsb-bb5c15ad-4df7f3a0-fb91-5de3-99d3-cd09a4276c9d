@@ -24,3 +24,23 @@ export interface GraphState {
   levels: Record<string, number>;
   levelCount: number;
 }
+
+/** 一条冗余直接边及其最短替代路径（约束瘦身） */
+export interface Redundancy {
+  /** 冗余连线 id */
+  edgeId: number;
+  fromId: string;
+  toId: string;
+  /** 忽略该连线后 fromId → toId 的一条最短替代路径（含两端，长度 ≥ 2） */
+  alternativePath: string[];
+}
+
+export interface SlimReport {
+  redundant: Redundancy[];
+  count: number;
+}
+
+/** POST /api/slim/apply 的响应：最新全量状态 + 本次实际移除条数 */
+export interface SlimResult extends GraphState {
+  removed: number;
+}

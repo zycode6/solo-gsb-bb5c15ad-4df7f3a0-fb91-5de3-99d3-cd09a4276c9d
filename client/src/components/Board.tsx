@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Conflict } from '../App';
-import type { Evidence, GraphState } from '../types';
+import type { Evidence, GraphState, Redundancy } from '../types';
 
 interface Rect {
   x: number;
@@ -9,10 +9,16 @@ interface Rect {
   h: number;
 }
 
+/** 瘦身高亮：原冗余连线 + 最短替代路径（路径上相邻节点构成的边序列） */
+export interface SlimHighlight {
+  redundancy: Redundancy;
+}
+
 interface BoardProps {
   state: GraphState;
   conflict: Conflict | null;
   linkFrom: string | null;
+  slimHighlight: SlimHighlight | null;
   onStartLink: (id: string) => void;
   onCancelLink: () => void;
   onConnect: (fromId: string, toId: string) => void;
@@ -53,7 +59,7 @@ function fmtTime(iso: string | null): string | null {
 }
 
 export default function Board(props: BoardProps) {
-  const { state, conflict, linkFrom } = props;
+  const { state, conflict, linkFrom, slimHighlight } = props;
   const boardRef = useRef<HTMLDivElement>(null);
   const [positions, setPositions] = useState<Record<string, Rect>>({});
   const [svgSize, setSvgSize] = useState({ w: 0, h: 0 });
@@ -85,6 +91,16 @@ export default function Board(props: BoardProps) {
     return s;
   }, [conflict]);
   const attempted = conflict && conflict.cycle.length >= 2 ? { from: conflict.cycle[0], to: conflict.cycle[1] } : null;
+
+  /* 瘦身高亮：冗余原边、替代路径上的边与节点 */
+  const slimRedundantKey = slimHighlight ? `${slimHighlight.redundancy.fromId}->${slimHighlight.redundancy.toId}` : null;
+  const slimPathEdgeKeys = useMemo(() => {
+    const s = new Set<string>();
+    const p = slimHighlight?.redundancy.alternativePath;
+    if (p) for (let i = 0; i < p.length - 1; i++) s.add(`${p[i]}->${p[i + 1]}`);
+    return s;
+  }, [slimHighlight]);
+  const slimPathNodes = useMemo(() => new Set(slimHighlight?.redundancy.alternativePath ?? []), [slimHighlight]);
 
   /* 测量卡片位置，用于绘制 SVG 连线 */
   useLayoutEffect(() => {
@@ -178,6 +194,12 @@ export default function Board(props: BoardProps) {
           <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 1 L 9 5 L 0 9 z" fill="#ff5c6c" />
           </marker>
+          <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#fbbf24" />
+          </marker>
+          <marker id="arrow-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#4ade80" />
+          </marker>
         </defs>
 
         {state.edges.map((e) => {
@@ -185,12 +207,26 @@ export default function Board(props: BoardProps) {
           const t = positions[e.toId];
           if (!s || !t) return null;
           const isConflict = conflictEdgeKeys.has(`${e.fromId}->${e.toId}`);
+          const key = `${e.fromId}->${e.toId}`;
+          const isRedundant = slimRedundantKey !== null && key === slimRedundantKey;
+          const isAltPath = slimPathEdgeKeys.has(key);
+          const isDimmed = slimHighlight !== null && !isRedundant && !isAltPath;
+          const cls = [
+            'edge',
+            isConflict ? 'conflict' : '',
+            isRedundant ? 'slim-redundant' : '',
+            isAltPath ? 'slim-alt-path' : '',
+            isDimmed ? 'dimmed' : '',
+          ]
+            .filter(Boolean)
+            .join(' ');
+          const marker = isConflict ? 'arrow-red' : isRedundant ? 'arrow-amber' : isAltPath ? 'arrow-ok' : 'arrow';
           const d = curve(s, t);
           return (
-            <g key={e.id} className={`edge${isConflict ? ' conflict' : ''}`} onClick={() => props.onDeleteEdge(e.id)}>
+            <g key={e.id} className={cls} onClick={() => props.onDeleteEdge(e.id)}>
               <title>{`${byId.get(e.fromId)?.title ?? ''} 必须早于 ${byId.get(e.toId)?.title ?? ''}（点击删除）`}</title>
               <path className="edge-hit" d={d} />
-              <path className="edge-line" d={d} markerEnd={`url(#${isConflict ? 'arrow-red' : 'arrow'})`} />
+              <path className="edge-line" d={d} markerEnd={`url(#${marker})`} />
             </g>
           );
         })}
@@ -221,6 +257,8 @@ export default function Board(props: BoardProps) {
               const inConflict = conflictNodes.has(ev.id);
               const isSource = linkFrom === ev.id;
               const isTarget = linkFrom !== null && linkFrom !== ev.id;
+              const onAltPath = slimPathNodes.has(ev.id);
+              const isDimmed = slimHighlight !== null && !onAltPath;
               return (
                 <article
                   key={ev.id}
@@ -230,6 +268,8 @@ export default function Board(props: BoardProps) {
                     inConflict ? 'in-conflict' : '',
                     isSource ? 'link-source' : '',
                     isTarget ? 'link-target' : '',
+                    onAltPath ? 'slim-path-node' : '',
+                    isDimmed ? 'dimmed' : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}
